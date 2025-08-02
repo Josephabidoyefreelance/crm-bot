@@ -1,14 +1,14 @@
 import requests
 
-CLOSE_API_KEY = "api_0EGy0bKxb2gy8Mxp6Q8xEU.63jttk8josvYzeCIIA66O9"  # Your real Close API key
-WEBHOOK_URL = "https://25328375516e.ngrok-free.app/webhook"     # Confirm your active ngrok URL
+CLOSE_API_KEY = "api_2syo0UnYRkhah2CxWw9fxI.380io3msbLAsxh6EaqMl4B"
+WEBHOOK_URL = "https://f15f3534ada6.ngrok-free.app/webhook"
 
 payload = {
     "url": WEBHOOK_URL,
     "enabled": True,
     "events": [
         {
-            "object_type": "activity.sms",  # ✅ Listen for SMS messages
+            "object_type": "activity.sms",
             "action": "created"
         }
     ]

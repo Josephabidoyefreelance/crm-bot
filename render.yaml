@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: close-webhook
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python webhook.py
+    envVars:
+      - key: CLOSE_API_KEY
+        fromDotEnv: true

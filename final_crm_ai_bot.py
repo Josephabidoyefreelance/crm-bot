@@ -1,136 +1,219 @@
-import os
-import time
-import json
-import requests
-import openai
-from dotenv import load_dotenv
+def classify_reply(text, current_lead_status=None, current_workflow=None):
+    """
+    Classify the incoming text reply and decide:
+    - What templates to send (list)
+    - Whether to change lead status
+    - Whether to resume workflow
+    """
 
-# Load your API keys from .env
-load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
-CLOSEIO_API_KEY = os.getenv("CLOSEIO_API_KEY")
-BASE_URL = "https://api.close.com/api/v1"
+    text_lower = text.lower().strip()
 
-# Make sure keys are loaded
-print("OpenAI key loaded:", openai.api_key is not None)
-print("Close.io key loaded:", CLOSEIO_API_KEY is not None)
+    # Templates
+    template_identity = "My name is Troy Golden, I am a commercial real estate broker. I help people sell properties like 1250 Larkin Ave. Can we have a call? Here's my website: https://goldengrouprealestateinc.com/"
+    template_discuss = "I wish to discuss my listing services and how I can help you sell properties like 1250 Larkin Ave"
+    template_help_sell = "I help people sell properties like 1250 Larkin Ave. Can we have a call? Here's my website: https://goldengrouprealestateinc.com"
+    template_do_you_have_buyer = "I don’t currently have a buyer in hand, but I’m actively looking. Are you working with any buyers?"
 
-# Templates to send
-TEMPLATES = {
-    "who is this": "Hi, this is Troy Golden, a commercial real estate broker. I help property owners sell their properties.",
-    "what do you want to talk about": "I'm reaching out to see if you're open to offers or planning to sell your property.",
-    "yes": "Thanks for confirming. I’d like to share how I can help you sell.",
-    "do you have a buyer": "Yes, I work with buyers actively searching for properties like yours."
-}
+    reply_templates = []
+    new_status = None
+    resume_workflow = False
 
-LAST_FILE = "last_sms_id.txt"
+    # 1. Identity questions
+    identity_keywords = ["who is this", "what company", "who are you", "what's your name"]
+    # 2. What want to discuss
+    discuss_keywords = ["what do you want to talk about", "how can i help you", "what’s up", "what's this about", "what do you want"]
 
-def get_last_processed_id():
-    if os.path.exists(LAST_FILE):
-        return open(LAST_FILE).read().strip()
-    return None
+    # Helper checks
+    def contains_any(text, keywords):
+        return any(k in text for k in keywords)
 
-def save_last_processed_id(i):
-    with open(LAST_FILE, "w") as f:
-        f.write(i)
+    # Scenario 3: Combined identity + discuss
+    identity_asked = contains_any(text_lower, identity_keywords)
+    discuss_asked = contains_any(text_lower, discuss_keywords)
 
-def fetch_sms():
-    resp = requests.get(f"{BASE_URL}/activity/sms/?direction=incoming&sort=-date_created&limit=20",
-                        auth=(CLOSEIO_API_KEY, ''))
-    if resp.status_code != 200:
-        print("Failed to fetch SMS:", resp.text)
-        return []
-    return resp.json().get("data", [])
+    # Scenario 4: sold property
+    sold_keywords = ["we sold the property", "we no longer own the property", "i sold it", "it's sold", "its sold"]
 
-def send_sms(contact_id, body):
-    r = requests.post(f"{BASE_URL}/activity/sms/",
-                      json={"contact_id": contact_id, "body": body},
-                      auth=(CLOSEIO_API_KEY, ''))
-    print("SMS sent" if r.ok else "SMS send failed:", r.text)
+    # Scenario 5: soft no selling
+    soft_no_keywords = ["not interested in selling", "not selling", "not for sale", "just looking for a tenant", "just leasing the property"]
 
-def update_status(lead_id, status):
-    r = requests.put(f"{BASE_URL}/lead/{lead_id}/", json={"status_label": status},
-                     auth=(CLOSEIO_API_KEY, ''))
-    print(f"Status {status} updated" if r.ok else "Status update failed:", r.text)
+    # Scenario 6: no exclusive listing
+    no_exclusive_keywords = [
+        "we're selling the property ourselves", "we don't work with brokers",
+        "bring me a buyer and i'll pay you a commission", "if you bring me a buyer i'll work with you, but i don't list my properties",
+        "not looking to list but will consider offers", "so go sell it then", "i'll pay you for any buyer you bring"
+    ]
 
-def resume_workflow(lead_id, wf):
-    print(f"Resuming workflow '{wf}' for lead {lead_id} (placeholder)")
+    # Scenario 7: confirm ownership
+    confirm_ownership_keywords = ["yes", "yep", "i own that property", "maybe", "how can i help you"]
 
-def classify_reply(text, status, workflow):
-    prompt = f"""
-Contact reply: "{text}"
-Current status: {status}
-Current workflow: {workflow}
+    # Scenario 8: listed with broker
+    listed_with_broker_keywords = ["we're already working with a broker", "the property is listed", "please talk to my agent", "have a broker"]
 
-Return ONLY JSON like:
-{{
- "template_to_send": string or null,
- "lead_status_change": string or null,
- "should_resume_workflow": true or false
-}}
+    # Scenario 9: under contract
+    under_contract_keywords = ["it's under contract", "in due diligence", "in escrow", "scheduled to close", "contract signed", "closing soon"]
 
-Based on these rules:
-- Ask who you are → template "who is this"
-- Ask what you want → template "what do you want to talk about"
-- Confirm owner → template "yes"
-- Ask if you have a buyer → template "do you have a buyer"
-- If sold → status "Prevsold"
-- Soft no selling → status "Soft no"
-- Broker-only interest → status "Not interested"
-- Listed already → "ReListed 1" or "ReListed 2"
-- Under contract → "Under Contract" or "Under Contract 2"
-- Otherwise, no action
-"""
-    try:
-        resp = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2
-        )
-        return json.loads(resp['choices'][0]['message']['content'])
-    except Exception as e:
-        print("OpenAI error:", e)
-        return None
+    # Scenario 10: maybe interested / price info
+    maybe_keywords = ["maybe", "might sell", "depending on price"]
+    # Additionally, check if text is mostly numeric (price)
+    is_price = text_lower.replace('.', '', 1).replace('mil', '').replace('m', '').replace('$', '').strip().replace(',', '').isdigit()
 
-def process():
-    last_id = get_last_processed_id()
-    messages = fetch_sms()
-    if not messages:
-        return last_id
+    # Scenario 11: ask about buyer
+    ask_buyer_keywords = ["do you have a buyer", "you have someone that wants to buy the property"]
 
-    for msg in reversed(messages):
-        if msg["id"] == last_id:
-            continue
+    # Scenario 12: wants to talk personally
+    wants_talk_keywords = ["i have interest in selling", "yes please call"]
 
-        contact_id = msg.get("contact_id")
-        lead_id = msg.get("lead_id")
-        body = msg.get("text_body", "")
-        status = msg.get("lead_status_label", "")
-        workflow = msg.get("status_label") or ""
+    # Scenario 13: workflow stopping phrases
+    workflow_stop_keywords = ["i have a broker already", "i have a broker"]
 
-        print("\n📩 New message:", body)
-        result = classify_reply(body, status, workflow)
-        print("Classification result:", result)
+    # Start classification logic
 
-        if result:
-            tmpl = result.get("template_to_send")
-            new_stat = result.get("lead_status_change")
-            resume = result.get("should_resume_workflow", False)
+    # Scenario 3 combined - check first to handle both identity & discuss
+    if identity_asked and discuss_asked:
+        reply_templates.append(template_help_sell)
+        reply_templates.append(template_discuss)
+        # No status change, resume workflow if in FLBO/FSBO/Expired workflows
+        if current_workflow in ["FLBO 1", "FLBO 2", "FSBO 1", "FSBO 2", "Expired 1", "Expired 2"]:
+            resume_workflow = True
+        return {"reply_templates": reply_templates, "new_status": None, "resume_workflow": resume_workflow}
 
-            if tmpl in TEMPLATES:
-                send_sms(contact_id, TEMPLATES[tmpl])
-            if new_stat:
-                update_status(lead_id, new_stat)
-            elif resume:
-                resume_workflow(lead_id, workflow)
+    # Scenario 1 - identity questions only
+    if identity_asked and not discuss_asked:
+        reply_templates.append(template_identity)
+        if current_workflow in ["FLBO 1", "FLBO 2", "FSBO 1", "FSBO 2", "Expired 1", "Expired 2"]:
+            resume_workflow = True
+        return {"reply_templates": reply_templates, "new_status": None, "resume_workflow": resume_workflow}
 
-        last_id = msg["id"]
+    # Scenario 2 - discuss questions only
+    if discuss_asked and not identity_asked:
+        reply_templates.append(template_discuss)
+        if current_workflow in ["FLBO 1", "FLBO 2", "FSBO 1", "FSBO 2", "Expired 1", "Expired 2"]:
+            resume_workflow = True
+        return {"reply_templates": reply_templates, "new_status": None, "resume_workflow": resume_workflow}
 
-    save_last_processed_id(last_id)
-    return last_id
+    # Scenario 4 - sold property
+    if contains_any(text_lower, sold_keywords):
+        new_status = "Prevsold"
+        return {"reply_templates": [], "new_status": new_status, "resume_workflow": False}
+
+    # Scenario 5 - soft no selling
+    if contains_any(text_lower, soft_no_keywords):
+        new_status = "soft no"
+        return {"reply_templates": [], "new_status": new_status, "resume_workflow": False}
+
+    # Scenario 6 - no exclusive listing
+    if contains_any(text_lower, no_exclusive_keywords):
+        new_status = "not interested"
+        return {"reply_templates": [], "new_status": new_status, "resume_workflow": False}
+
+    # Scenario 7 - confirm ownership
+    if contains_any(text_lower, confirm_ownership_keywords):
+        reply_templates.append(template_help_sell)
+        if current_workflow in ["FLBO 1", "FLBO 2", "FSBO 1", "FSBO 2", "Expired 1", "Expired 2"]:
+            resume_workflow = True
+        return {"reply_templates": reply_templates, "new_status": None, "resume_workflow": resume_workflow}
+
+    # Scenario 8 - listed with broker
+    if contains_any(text_lower, listed_with_broker_keywords):
+        if current_lead_status == "Relisted 1":
+            new_status = "Hi TEST, is still available for sale? -Troy, CRE Broker"
+        else:
+            new_status = "Hi TEST, following up about in . Has the property sold yet? -Troy Golden, CRE broker"
+        return {"reply_templates": [], "new_status": new_status, "resume_workflow": False}
+
+    # Scenario 9 - under contract
+    if contains_any(text_lower, under_contract_keywords):
+        if current_lead_status == "Under Contract":
+            new_status = "Under Contract 2"
+        else:
+            new_status = "Under Contract"
+        return {"reply_templates": [], "new_status": new_status, "resume_workflow": False}
+
+    # Scenario 10 - maybe interested / price info - no response or change
+    if contains_any(text_lower, maybe_keywords) or is_price:
+        return {"reply_templates": [], "new_status": None, "resume_workflow": False}
+
+    # Scenario 11 - ask about buyer
+    if contains_any(text_lower, ask_buyer_keywords):
+        reply_templates.append(template_do_you_have_buyer)
+        if current_workflow in ["FLBO 1", "FLBO 2", "FSBO 1", "FSBO 2", "Expired 1", "Expired 2"]:
+            resume_workflow = True
+        return {"reply_templates": reply_templates, "new_status": None, "resume_workflow": resume_workflow}
+
+    # Scenario 12 - wants to talk personally
+    if contains_any(text_lower, wants_talk_keywords):
+        # No reply, no status change, no workflow resume — handled personally
+        return {"reply_templates": [], "new_status": None, "resume_workflow": False}
+
+    # Scenario 13 - workflow stopping phrases
+    if contains_any(text_lower, workflow_stop_keywords):
+        # No reply, but lead status needs to be changed (handle externally)
+        # Here we don't reply or resume workflow; lead status logic external
+        return {"reply_templates": [], "new_status": None, "resume_workflow": False}
+
+    # Default: unknown scenarios, no reply, no status change
+    return {"reply_templates": [], "new_status": None, "resume_workflow": False}
+
+
+def run_tests():
+    test_cases = [
+        # Scenario 1: identity questions
+        ("Who is this?", None, None),
+        ("What company do you work for?", None, None),
+
+        # Scenario 2: what want to discuss
+        ("What do you want to talk about?", None, None),
+
+        # Scenario 3: combined identity + discuss
+        ("I own that property! Who are you sir!", None, "FLBO 1"),
+        ("Who is this? What's up?", None, "FSBO 2"),
+
+        # Scenario 4: sold property
+        ("We sold the property last week.", None, None),
+
+        # Scenario 5: soft no selling
+        ("We're not interested in selling right now.", None, None),
+
+        # Scenario 6: no exclusive listing
+        ("We're selling the property ourselves.", None, None),
+
+        # Scenario 7: confirm ownership
+        ("Yes, I own that property", None, None),
+
+        # Scenario 8: property listed with broker
+        ("We're already working with a broker.", "Relisted 1", None),
+        ("Please talk to my agent.", None, None),
+
+        # Scenario 9: under contract
+        ("It's under contract.", None, None),
+        ("Contract signed, closing soon.", "Under Contract", None),
+
+        # Scenario 10: maybe interested / price info
+        ("1.5 mil", None, None),
+        ("Maybe...", None, None),
+
+        # Scenario 11: ask about buyer
+        ("Do you have a buyer?", None, None),
+
+        # Scenario 12: wants to talk personally
+        ("Yes please call me.", None, None),
+
+        # Scenario 13: workflow stopping
+        ("I have a broker already.", None, None),
+
+        # Unknown scenario
+        ("Random message that needs personal attention.", None, None),
+    ]
+
+    for i, (text, lead_status, workflow) in enumerate(test_cases, 1):
+        print(f"Test case {i}: '{text}'")
+        result = classify_reply(text, current_lead_status=lead_status, current_workflow=workflow)
+        print("  Reply templates:", result["reply_templates"])
+        print("  New lead status:", result["new_status"])
+        print("  Resume workflow:", result["resume_workflow"])
+        print("-" * 50)
+
 
 if __name__ == "__main__":
-    print("🤖 CRM AI Responder started.")
-    while True:
-        process()
-        time.sleep(15)
+    run_tests()

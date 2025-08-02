@@ -30,7 +30,8 @@ Incoming text: "{text}"
 """
     try:
         resp = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo"
+,
             messages=[{"role": "system", "content": system_prompt}],
             temperature=0.3
         )
