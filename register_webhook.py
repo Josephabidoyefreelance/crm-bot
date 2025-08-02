@@ -1,6 +1,12 @@
+import os
 import requests
+from dotenv import load_dotenv
 
-CLOSE_API_KEY = "api_2syo0UnYRkhah2CxWw9fxI.380io3msbLAsxh6EaqMl4B"
+# Load environment variables from .env file
+load_dotenv()
+
+# Get API key securely from environment
+CLOSE_API_KEY = os.getenv("CLOSE_IO_API_KEY")
 WEBHOOK_URL = "https://f15f3534ada6.ngrok-free.app/webhook"
 
 payload = {

@@ -1,6 +1,10 @@
+import os
 import requests
+from dotenv import load_dotenv
 
-api_key = "api_2syo0UnYRkhah2CxWw9fxI.380io3msbLAsxh6EaqMl4B"  # Replace with your actual new API key
+load_dotenv()  # loads variables from .env
+
+api_key = os.getenv("CLOSE_IO_API_KEY")
 
 url = "https://api.close.com/api/v1/me/"
 

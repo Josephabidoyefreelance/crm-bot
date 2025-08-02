@@ -1,7 +1,10 @@
+import os
 import requests
+from dotenv import load_dotenv
 
-# Your Close API key here (keep it private!)
-API_KEY = "api_2syo0UnYRkhah2CxWw9fxI.380io3msbLAsxh6EaqMl4B"
+load_dotenv()  # loads variables from .env
+
+API_KEY = os.getenv("CLOSE_IO_API_KEY")
 
 HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
@@ -32,8 +35,8 @@ def create_webhook(new_url):
         print("Response:", response.text)
 
 if __name__ == "__main__":
-    old_webhook_id = "whsub_5DVojT0hIrl3808kBBnhS7"  # <-- Your old webhook ID here
-    new_webhook_url = "https://f15f3534ada6.ngrok-free.app/webhook"  # <-- Your new webhook URL here
+    old_webhook_id = "whsub_5DVojT0hIrl3808kBBnhS7"  # Your old webhook ID here
+    new_webhook_url = "https://f15f3534ada6.ngrok-free.app/webhook"  # Your new webhook URL here
 
     delete_webhook(old_webhook_id)
     create_webhook(new_webhook_url)

@@ -1,6 +1,12 @@
+import os
 import requests
+from dotenv import load_dotenv
 
-CLOSE_API_KEY = "api_2syo0UnYRkhah2CxWw9fxI.380io3msbLAsxh6EaqMl4B"
+# Load environment variables from .env file
+load_dotenv()
+
+# Get the API key safely from environment variables
+CLOSE_API_KEY = os.getenv("CLOSE_IO_API_KEY")
 WEBHOOK_ID = "whsub_5DVojT0hIrl3808kBBnhS7"
 
 url = f"https://api.close.com/api/v1/webhook/{WEBHOOK_ID}/"
